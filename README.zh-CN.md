@@ -50,7 +50,7 @@
 
 | 用途 | 服务 | 是否必需 | 获取地址 |
 |------|------|---------|---------|
-| Twitter 搜索 | AISA Twitter Autopilot | **必需** | https://aisa.one/skills/twitter-autopilot |
+| Twitter 搜索 | AISA Twitter Autopilot | **必需** | https://aisa.one/skills/twitter-autopilot?utm_source=twitter&utm_medium=text&utm_campaign=gefei |
 | 域名流量 | aitdk | 可选 | https://aitdk.com |
 | 域名注册时间 | query.domains | 可选 | https://query.domains |
 

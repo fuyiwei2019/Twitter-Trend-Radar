@@ -61,7 +61,7 @@ Browser (index.html)  ──>  Local proxy (server.py)  ──>  Three external 
 
 | Purpose | Service | Required | Where |
 |---------|---------|----------|-------|
-| Twitter search | AISA Twitter Autopilot | **Yes** | https://aisa.one/skills/twitter-autopilot |
+| Twitter search | AISA Twitter Autopilot | **Yes** | https://aisa.one/skills/twitter-autopilot?utm_source=twitter&utm_medium=text&utm_campaign=gefei |
 | Domain traffic | aitdk | Optional | https://aitdk.com |
 | Domain reg. date | query.domains | Optional | https://query.domains |
 
