@@ -1,0 +1,16 @@
+# 绝不提交真实 key
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 系统/编辑器
+.DS_Store
+.idea/
+.vscode/
+*.log
