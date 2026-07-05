@@ -202,6 +202,16 @@
   .age.plat{background:rgba(120,170,255,.12);color:#8fb6ff;border:1px solid rgba(120,170,255,.3)}
   .age.loading{background:transparent;color:var(--ink-faint);border:1px solid var(--line);
                animation:blink 1.1s ease-in-out infinite}
+  .judge{border-top:1px dashed var(--line);padding-top:9px;font-size:11px;color:var(--ink-dim);display:flex;flex-direction:column;gap:5px}
+  .jrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .jtag{font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-dim);background:rgba(125,143,136,.08);font-weight:600}
+  .jtag.target{color:var(--green);border-color:rgba(78,227,154,.35);background:rgba(78,227,154,.12)}
+  .jtag.noise{color:#ff7a6b;border-color:rgba(255,122,107,.35);background:rgba(255,122,107,.10)}
+  .jtag.warn{color:var(--amber);border-color:rgba(255,210,94,.35);background:rgba(255,210,94,.10)}
+  .jscore{color:var(--ink);font-weight:700}
+  .jreason{color:var(--ink-faint);line-height:1.45}
+  .finalurl{color:var(--ink-faint);font-size:10.5px;word-break:break-all}
+  .finalurl b{color:var(--ink-dim);font-weight:500}
   @keyframes blink{50%{opacity:.4}}
   .traffic.none.pending{color:var(--ink-faint);animation:blink 1.1s ease-in-out infinite}
   .card.pending{opacity:.92}
@@ -253,14 +263,19 @@
       </div>
       <div class="field">
         <label>推文时间</label>
-        <select id="days">
-          <option value="30">最近 1 个月</option>
-          <option value="90" selected>最近 3 个月</option>
-          <option value="180">最近半年</option>
-          <option value="365">最近一年</option>
-          <option value="730">最近两年</option>
+        <select id="hours">
+          <option value="6">最近 6 小时</option>
+          <option value="12">最近 12 小时</option>
+          <option value="24">最近 24 小时</option>
+          <option value="48" selected>最近 48 小时</option>
+          <option value="72">最近 72 小时</option>
+          <option value="168">最近 7 天</option>
           <option value="0">不限</option>
         </select>
+      </div>
+      <div class="field">
+        <label>每词拉取</label>
+        <input id="limit" type="number" value="100" min="1" max="200" style="width:100px">
       </div>
       <div class="field">
         <label>域名最大天龄</label>
@@ -273,6 +288,14 @@
           <option value="730">≤ 2 年</option>
           <option value="1095">≤ 3 年</option>
           <option value="1825">≤ 5 年</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>噪音过滤</label>
+        <select id="noise">
+          <option value="hide_noise" selected>隐藏噪音</option>
+          <option value="ai_only">只看目标机会</option>
+          <option value="all">全部显示</option>
         </select>
       </div>
     </div>
@@ -293,9 +316,9 @@
         自动巡逻
         <select id="interval">
           <option value="0">关</option>
-          <option value="15">每 15s</option>
-          <option value="30" selected>每 30s</option>
-          <option value="60">每 60s</option>
+          <option value="1800">每 30 分钟</option>
+          <option value="3600" selected>每 1 小时</option>
+          <option value="10800">每 3 小时</option>
         </select>
         <button class="ghost" id="toggleauto">启动</button>
       </div>
@@ -435,7 +458,12 @@ renderKeywords();
 async function checkKey(){
   try{
     const r = await fetch("/api/status"); const j = await r.json();
-    if(j.has_key){ $("#keydot").className="dot live"; $("#keytext").textContent="API KEY 已就绪"; }
+    if(j.has_key){
+      $("#keydot").className="dot live";
+      const ai = j.judge_mode==="ai" ? `AI已启用:${j.openai_model}` : "本地规则判断";
+      const tld = j.tldextract ? "tldextract" : "内置域名规则";
+      $("#keytext").textContent=`API KEY 已就绪 · ${ai} · ${tld}`;
+    }
     else{ $("#keydot").className="dot"; $("#keytext").innerHTML='<span class="err">未设置 API KEY</span>'; }
   }catch(e){ $("#keytext").innerHTML='<span class="err">代理未连接</span>'; }
 }
@@ -461,6 +489,14 @@ function fmtVisits(n){
   if(n>=1e6) return (n/1e6).toFixed(1)+"M";
   if(n>=1e3) return (n/1e3).toFixed(1)+"K";
   return ""+n;
+}
+
+function fmtScore(n){
+  if(n==null || n==="") return "";
+  const v=Number(n);
+  if(!isFinite(v)) return "";
+  if(v>=1000) return fmtVisits(v);
+  return v.toFixed(v>=100 ? 0 : 1);
 }
 
 function trafficBlock(t){
@@ -528,6 +564,8 @@ function sourceLabel(src){
   const cond = [];
   if(src.min_faves && src.min_faves!=="0") cond.push("♥≥"+src.min_faves);
   if(src.links==="1") cond.push("带链接");
+  if(src.hours && src.hours!=="0") cond.push("近"+src.hours+"h");
+  if(src.limit) cond.push("拉"+src.limit+"条");
   if(src.max_age && src.max_age!=="0") cond.push("≤"+src.max_age+"天");
   const condTxt = cond.length? cond.join(" · ") : "无附加条件";
   return `<div class="src" style="--hue:${hue}">
@@ -546,7 +584,28 @@ function isLinkFresh(l){
   return false;
 }
 
-// 渲染单条链接的内部（年龄徽章 + 流量），enrich 前后都用它
+function judgeBlock(l){
+  const j = l.judgment || null;
+  if(!j){
+    return `<div class="judge"><div class="jrow"><span class="jtag warn">判断中…</span></div></div>`;
+  }
+  const cat = j.content_category || j.noise_category || "unknown";
+  const level = j.target_level || (j.is_target ? "target" : (j.is_noise ? "reject" : "watch"));
+  const cls = level==="target" ? "target" : (level==="watch" ? "warn" : "noise");
+  const label = level==="target" ? "目标" : (level==="watch" ? "观察" : "过滤");
+  const score = (j.opportunity_score!=null) ? `<span>机会分 <b class="jscore">${esc(String(j.opportunity_score))}</b></span>` : "";
+  const fit = j.product_fit ? `<span>产品匹配：${esc(j.product_fit)}</span>` : "";
+  const opp = j.opportunity_type ? `<span>机会：${esc(j.opportunity_type)}</span>` : "";
+  const src = j.judge_source ? `<span>${esc(j.judge_source)}</span>` : "";
+  const action = j.recommended_action ? `<div class="jreason">${esc(j.recommended_action)}</div>` : "";
+  const reason = j.reason ? `<div class="jreason">${esc(j.reason)}</div>` : (j.ai_error ? `<div class="jreason">${esc(j.ai_error)}</div>` : "");
+  return `<div class="judge">
+    <div class="jrow"><span class="jtag ${cls}">${esc(cat)} · ${label}</span>${score}${fit}${opp}${src}</div>
+    ${action}${reason}
+  </div>`;
+}
+
+// 渲染单条链接的内部（年龄徽章 + 流量 + AI/噪音判断），enrich 前后都用它
 function linkInner(l){
   const whoisLink = l.platform
     ? `<span class="whoislink dim" title="部署在平台子域名上，无独立 whois">无独立注册</span>`
@@ -555,13 +614,21 @@ function linkInner(l){
   const traffic = l.pending
     ? `<div class="traffic none pending">流量查询中…</div>`
     : trafficBlock(l.traffic);
+  const href = l.final_url || l.url;
+  const label = l.domain || l.final_host || l.host || href;
+  const final = (!l.pending && l.final_url && l.url && l.final_url !== l.url)
+    ? `<div class="finalurl"><b>最终：</b>${esc(l.final_url)}</div>` : "";
+  const discovery = l.discovery_source ? `<span class="jtag target">${esc(l.discovery_source)} 来源</span>` : "";
   return `
     <div class="lkrow">
       ${badge}
-      <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.domain)}</a>
+      <a href="${esc(href)}" target="_blank" rel="noopener">${esc(label)}</a>
+      ${discovery}
       ${whoisLink}
     </div>
-    ${traffic}`;
+    ${final}
+    ${traffic}
+    ${l.pending ? '<div class="judge"><div class="jrow"><span class="jtag warn">URL/AI 判断中…</span></div></div>' : judgeBlock(l)}`;
 }
 
 let _cardSeq = 0;
@@ -593,6 +660,8 @@ function render(item, src){
       <span>↻ <b>${(item.retweets||0).toLocaleString()}</b></span>
       <span>💬 <b>${(item.replies||0).toLocaleString()}</b></span>
       ${item.views?`<span>👁 <b>${(+item.views).toLocaleString()}</b></span>`:""}
+      ${item.velocity_score?`<span title="互动总分 / 推文存在小时数">⚡ <b>${fmtScore(item.velocity_score)}</b>/h</span>`:""}
+      ${item.age_hours?`<span title="推文发布时间距现在">⏱ <b>${fmtScore(item.age_hours)}</b>h</span>`:""}
       <a class="whoislink" href="${esc(item.url)}" target="_blank" rel="noopener" style="margin-left:0">原推 ↗</a>
     </div>
     ${linksHtml?`<div class="links">${linksHtml}</div>`:""}
@@ -608,9 +677,9 @@ const _enrichQueue = [];
 let _enrichActive = 0;
 const ENRICH_CONCURRENCY = 4;
 
-function enqueueEnrich(host, maxAge){
+function enqueueEnrich(host, url, maxAge, text){
   return new Promise((resolve)=>{
-    _enrichQueue.push({host, maxAge, resolve});
+    _enrichQueue.push({host, url, maxAge, text, resolve});
     pumpEnrich();
   });
 }
@@ -618,7 +687,8 @@ function pumpEnrich(){
   while(_enrichActive < ENRICH_CONCURRENCY && _enrichQueue.length){
     const job = _enrichQueue.shift();
     _enrichActive++;
-    const p = new URLSearchParams({host:job.host, whois:"1", traffic:"1",
+    const p = new URLSearchParams({host:job.host, url:job.url||"", text:job.text||"",
+                                   whois:"1", traffic:"1", judge:"1",
                                    max_age_days:job.maxAge||"0"});
     fetch("/api/enrich?"+p.toString())
       .then(r=>r.json())
@@ -636,13 +706,16 @@ async function enrichCard(cardId, src){
   const cap = parseInt(card.dataset.maxage||"0",10);
 
   await Promise.all(item.links.map(async (l,i)=>{
-    const e = await enqueueEnrich(l.host||l.domain, cap);
+    const e = await enqueueEnrich(l.host||l.domain, l.url||"", cap, item.text||"");
     if(e && !e.__error){
       Object.assign(l, {
         domain:e.domain||l.domain, platform:e.platform,
+        final_url:e.final_url||l.url, final_host:e.final_host||l.host,
+        original_url:e.original_url||l.url, discovery_source:e.discovery_source||l.discovery_source,
         created:e.created, age_days:e.age_days,
         age_unreliable:e.age_unreliable,
         qualified:e.qualified, traffic:e.traffic,
+        landing:e.landing, judgment:e.judgment, greylisted:e.greylisted,
         pending:false
       });
     }else{
@@ -659,8 +732,28 @@ async function enrichCard(cardId, src){
   // fresh 标记（与档位无关，只看是否真的新）
   if(item.links.some(isLinkFresh)) card.classList.add("fresh");
   item.links.forEach(l=>l.domain&&seenDomains.add(l.domain));
+  await saveResult(item, src);
   applyAgeFilterToCard(card);
   updateVisibleStats();
+}
+
+async function saveResult(item, src){
+  try{
+    const r = await fetch("/api/save_result", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({item, source:src})
+    });
+    const j = await r.json();
+    if(j && j.saved){
+      const csv = j.files && j.files.csv ? j.files.csv.split(/[\/]/).pop() : "CSV";
+      const md = j.files && j.files.md ? j.files.md.split(/[\/]/).pop() : "Markdown";
+      log.innerHTML += ` · 已保存 ${j.saved} 行到 ${esc(csv)} / ${esc(md)}`;
+    }
+  }catch(e){
+    // 保存失败不影响页面展示；只在日志轻提示。
+    log.innerHTML += ` · <span class="err">保存失败</span>`;
+  }
 }
 
 // 单卡片按当前"域名最大天龄"判断是否该显示
@@ -672,11 +765,24 @@ function ageVisible(card){
   return item.links.some(l=> l.platform || l.age_unreliable
                             || (l.age_days!=null && l.age_days<=cap));
 }
+function noiseVisible(card){
+  const mode = $("#noise") ? $("#noise").value : "all";
+  if(mode==="all") return true;
+  if(!card.dataset.enriched) return true;
+  const item = card._item;
+  return item.links.some(l=>{
+    const j = l.judgment || {};
+    if(mode==="hide_noise") return !j.is_noise;
+    if(mode==="ai_only") return !!j.is_target;
+    return true;
+  });
+}
 function applyAgeFilterToCard(card){
-  // 同时受"来源筛选"和"年龄档位"两个条件约束
+  // 同时受"来源筛选"、"年龄档位"、"噪音过滤"三个条件约束
   const passAge = !card.dataset.enriched ? true : ageVisible(card);
+  const passNoise = !card.dataset.enriched ? true : noiseVisible(card);
   const passSrc = !activeFilter || card.dataset.query===activeFilter;
-  card.style.display = (passAge && passSrc) ? "" : "none";
+  card.style.display = (passAge && passNoise && passSrc) ? "" : "none";
   card.dataset.agehidden = passAge ? "" : "1";
 }
 // 改档位时，重新过滤所有已 enrich 的卡片（瞬时，无需重查）
@@ -734,7 +840,8 @@ async function scanOne(q){
   const p=new URLSearchParams({
     query:q, min_faves:$("#minfaves").value||"0",
     links:$("#links").value, max_age_days:$("#maxage").value,
-    days:$("#days").value, whois:"1", traffic:"1"
+    hours:$("#hours").value, limit:$("#limit").value||"100",
+    whois:"1", traffic:"1"
   });
   log.innerHTML=`> 查询 X：<b style="color:var(--signal-soft)">${esc(q)}</b> …`;
   let attempt=0;
@@ -754,9 +861,10 @@ async function scanOne(q){
       cycles++; $("#s_cycles").textContent=cycles;
       const stamp=new Date().toLocaleTimeString();
       const src={ query:q, min_faves:$("#minfaves").value||"0",
-        links:$("#links").value, max_age:$("#maxage").value, cycle:cycles, stamp:stamp };
+        links:$("#links").value, hours:$("#hours").value, limit:$("#limit").value||"100",
+        max_age:$("#maxage").value, cycle:cycles, stamp:stamp };
       let added=0;
-      (j.results||[]).forEach(it=>{
+      (j.results||[]).slice().reverse().forEach(it=>{
         if(it.id && seenIds.has(it.id)) return;
         if(it.id) seenIds.add(it.id);
         added++;
@@ -764,7 +872,7 @@ async function scanOne(q){
         render(it, src);
       });
       updateVisibleStats();   // 统计与来源条由它统一刷新（含 pending 卡片）
-      log.innerHTML=`> ${stamp} ·「<b style="color:var(--signal-soft)">${esc(q)}</b>」：${j.count} 条已显示，新增 <b style="color:var(--green)">${added}</b> 条，补充年龄/流量中…`;
+      log.innerHTML=`> ${stamp} ·「<b style="color:var(--signal-soft)">${esc(q)}</b>」：${j.count} 条按速度排序，新增 <b style="color:var(--green)">${added}</b> 条，补充年龄/流量并自动保存中…`;
       return;
     }catch(e){
       log.innerHTML=`<span class="err">✕ 代理未响应，确认 server.py 正在运行</span>`;
@@ -826,8 +934,9 @@ $("#toggleauto").onclick=()=>{
 $("#interval").onchange=()=>{
   if(autoTimer){ $("#toggleauto").click(); $("#toggleauto").click(); }
 };
-// 改"域名最大天龄"：对已查到的卡片即时重新过滤，无需重查
+// 改"域名最大天龄 / 噪音过滤"：对已查到的卡片即时重新过滤，无需重查
 $("#maxage").onchange=()=>{ applyAgeFilter(); };
+$("#noise").onchange=()=>{ applyAgeFilter(); };
 </script>
 </body>
 </html>
